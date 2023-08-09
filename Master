@@ -1,0 +1,177 @@
+/*
+ * File:   main.c
+ * Author: Karla Lopez
+ * Lab 4 I2C Master
+ * Created on 5 de ago. de 2023, 10:32 AM
+ */
+//*****************************************************************************
+// Palabra de configuración
+//*****************************************************************************
+// CONFIG1
+#pragma config FOSC = EXTRC_NOCLKOUT// Oscillator Selection bits (RCIO oscillator: I/O function on RA6/OSC2/CLKOUT pin, RC on RA7/OSC1/CLKIN)
+#pragma config WDTE = OFF       // Watchdog Timer Enable bit (WDT disabled and can be enabled by SWDTEN bit of the WDTCON register)
+#pragma config PWRTE = OFF      // Power-up Timer Enable bit (PWRT disabled)
+#pragma config MCLRE = OFF      // RE3/MCLR pin function select bit (RE3/MCLR pin function is digital input, MCLR internally tied to VDD)
+#pragma config CP = OFF         // Code Protection bit (Program memory code protection is disabled)
+#pragma config CPD = OFF        // Data Code Protection bit (Data memory code protection is disabled)
+#pragma config BOREN = OFF      // Brown Out Reset Selection bits (BOR disabled)
+#pragma config IESO = OFF       // Internal External Switchover bit (Internal/External Switchover mode is disabled)
+#pragma config FCMEN = OFF      // Fail-Safe Clock Monitor Enabled bit (Fail-Safe Clock Monitor is disabled)
+#pragma config LVP = OFF        // Low Voltage Programming Enable bit (RB3 pin has digital I/O, HV on MCLR must be used for programming)
+
+// CONFIG2
+#pragma config BOR4V = BOR40V   // Brown-out Reset Selection bit (Brown-out Reset set to 4.0V)
+#pragma config WRT = OFF        // Flash Program Memory Self Write Enable bits (Write protection off)
+
+#include <stdint.h>
+#include <stdio.h> 
+#include <pic16f887.h>
+#include "I2C.h"
+#include "LCD.h"
+#include <xc.h>
+
+// Definición de variables globales
+uint8_t Val_Esclavo, Val_RCT;
+uint8_t current_year = 23;
+uint8_t current_month = 8;
+uint8_t current_day = 1;
+uint8_t current_hour = 0;
+uint8_t current_minute = 0;
+uint8_t current_second = 0;
+
+// Definición de pines de botones
+#define BTN_HOUR RB0
+#define BTN_MONTH RB1
+#define BTN_YEAR RB2
+
+#define _XTAL_FREQ 8000000
+
+// Función de configuración
+void setup(void);
+
+// Función para configurar la fecha y hora en el RTC
+void SetRTCDateTime(uint8_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second);
+
+// Función para leer la fecha y hora desde el RTC
+void ReadRTCDateTime(void);
+
+void main(void) {
+    setup();
+    char lcd_buffer[17];
+    while(1) {
+        if (BTN_HOUR == 0) {
+            __delay_ms(20);
+            if (BTN_HOUR == 0) {
+                current_hour++;
+                if (current_hour > 23) {
+                    current_hour = 0;
+                }
+                SetRTCDateTime(current_year, current_month, current_day, current_hour, current_minute, current_second);
+            }
+            while (BTN_HOUR == 0);
+        }
+
+        if (BTN_MONTH == 0) {
+            __delay_ms(20);
+            if (BTN_MONTH == 0) {
+                current_month++;
+                if (current_month > 12) {
+                    current_month = 1;
+                }
+                SetRTCDateTime(current_year, current_month, current_day, current_hour, current_minute, current_second);
+            }
+            while (BTN_MONTH == 0);
+        }
+
+        if (BTN_YEAR == 0) {
+            __delay_ms(20);
+            if (BTN_YEAR == 0) {
+                current_year++;
+                if (current_year > 99) {
+                    current_year = 0;
+                }
+                SetRTCDateTime(current_year, current_month, current_day, current_hour, current_minute, current_second);
+            }
+            while (BTN_YEAR == 0);
+        }
+        
+        ReadRTCDateTime();
+              
+        I2C_Master_Start();
+        //PORTB++; 
+        I2C_Master_Write(0x51);
+        Val_Esclavo = I2C_Master_Read(0);
+        I2C_Master_Stop();
+        __delay_ms(50);
+        
+
+       
+        I2C_Master_Start();
+        //PORTB++; 
+        I2C_Master_Write(0xD0); //direccion rtc escritura
+        I2C_Master_Write(0x00); //mandar segundos
+        I2C_Master_RepeatedStart();
+        I2C_Master_Write(0xD1); //direccion rtc lectura
+        Val_RCT = I2C_Master_Read(0);
+        I2C_Master_Stop();
+        __delay_ms(50);
+        
+        Lcd_Clear();
+ 
+        
+        sprintf(lcd_buffer, "%3u.%1u", Val_Esclavo );
+        Lcd_Set_Cursor(1, 1);
+        Lcd_Write_String(lcd_buffer);
+        
+        Lcd_Set_Cursor(2, 1);
+        sprintf(lcd_buffer, "%02u/%02u %02u:%02u", current_month,current_year, current_hour,  current_second);
+        Lcd_Write_String(lcd_buffer);
+    }
+    return;
+}
+
+void setup(void) {
+    ANSEL = 0;
+    ANSELH = 0;
+    TRISB = 0b00000111; // RB0, RB1, RB2 como entradas
+    TRISD = 0;
+    PORTB = 0;
+    PORTD = 0;
+    OPTION_REGbits.nRBPU = 0; // Habilitar resistencias pull-up en el Puerto B
+    Lcd_Init();
+    I2C_Master_Init(100000);
+}
+
+
+void SetRTCDateTime(uint8_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second) {
+    I2C_Master_Start(); // Iniciar comunicación I2C
+    I2C_Master_Write(0xD0); // Dirección de escritura del RTC
+
+    I2C_Master_Write(0x00); // Dirección del registro de segundos
+    I2C_Master_Write(second); // Escribir el valor de segundos
+    I2C_Master_Write(minute); // Escribir el valor de minutos
+    I2C_Master_Write(hour); // Escribir el valor de horas
+    I2C_Master_Write(day); // Escribir el valor de día
+    I2C_Master_Write(month); // Escribir el valor de mes
+    I2C_Master_Write(year); // Escribir el valor de año
+
+    I2C_Master_Stop(); // Detener comunicación I2C
+}
+
+void ReadRTCDateTime(void) {
+    I2C_Master_Start(); // Iniciar comunicación I2C
+    I2C_Master_Write(0xD0); // Dirección de escritura del RTC
+
+    I2C_Master_Write(0x00); // Dirección del registro de segundos
+    I2C_Master_RepeatedStart(); // Reiniciar la comunicación I2C
+    I2C_Master_Write(0xD1); // Dirección de lectura del RTC
+
+    current_second = I2C_Master_Read(1); // Leer segundos con ACK
+    current_minute = I2C_Master_Read(1); // Leer minutos con ACK
+    current_hour = I2C_Master_Read(1); // Leer horas con ACK
+    current_day = I2C_Master_Read(1); // Leer día con ACK
+    current_month = I2C_Master_Read(1); // Leer mes con ACK
+    current_year = I2C_Master_Read(0); // Leer año sin ACK
+
+    I2C_Master_Stop(); // Detener comunicación I2C
+}
